@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CapiNotes - Secure Local Storage Notes</title>
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- 
+    DEVELOPER NOTES:
+    1. Hosting: Open this file directly in any modern browser. No server required.
+    2. Data: All data is stored in your browser's LocalStorage. Clearing browser cache clears notes.
+    3. Customization: Search for ":root" in the <style> tag to change the color palette.
+    -->
+
+    <style>
+        /* --- CSS VARIABLES & THEME --- */
+        :root {
+            /* Palette based on image analysis */
+            --primary: #8B5CF6; /* Purple */
+            --primary-dark: #7C3AED;
+            --bg-color: #F3F4F6;
+            --surface-color: #FFFFFF;
+            --text-main: #1F2937;
+            --text-muted: #6B7280;
+            --border-radius: 24px;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            
+            /* Note Colors */
+            --note-purple: #C4B5FD;
+            --note-pink: #F9A8D4;
+            --note-peach: #FDBA74;
+            --note-green: #6EE7B7;
+            --note-blue: #93C5FD;
+            --note-default: #FFFFFF;
+        }
+
+        [data-theme="dark"] {
+            --primary: #A78BFA;
+            --bg-color: #111827;
+            --surface-color: #1F2937;
+            --text-main: #F9FAFB;
+            --text-muted: #9CA3AF;
+            --note-default: #374151;
+            /* Pastels remain strictly for cards, text inside cards handles contrast */
+        }
+
+        /* --- GLOBAL RESET --- */
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-tap-highlight-color: transparent; }
+        body { background-color: var(--bg-color); color: var(--text-main); transition: background 0.3s ease; height: 100vh; overflow: hidden; }
+        
+        /* --- UTILITIES --- */
+        .hidden { display: none !important; }
+        .btn-icon { background: none; border: none; font-size: 1.2rem; color: var(--text-main); cursor: pointer; padding: 10px; border-radius: 50%; transition: background 0.2s; }
+        .btn-icon:hover { background-color: rgba(0,0,0,0.05); }
+        [data-theme="dark"] .btn-icon:hover { background-color: rgba(255,255,255,0.1); }
+
+        /* --- APP CONTAINER --- */
+        #app { display: flex; flex-direction: column; height: 100%; position: relative; max-width: 600px; margin: 0 auto; background: var(--bg-color); box-shadow: 0 0 20px rgba(0,0,0,0.05); }
+
+        /* --- HEADER --- */
+        header { padding: 20px 24px; display: flex; align-items: center; justify-content: space-between; background: var(--bg-color); z-index: 10; }
+        h1 { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.5px; }
+        .search-bar { width: 100%; margin: 0 24px 10px; position: relative; }
+        .search-bar input { width: 100%; padding: 14px 45px; border-radius: 16px; border: none; background: var(--surface-color); color: var(--text-main); box-shadow: var(--shadow-sm); font-size: 1rem; outline: none; }
+        .search-bar i { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: var(--text-muted); }
+
+        /* --- NOTES VIEW (LIST & GRID) --- */
+        #notes-container { flex: 1; overflow-y: auto; padding: 10px 24px 100px; scroll-behavior: smooth; }
+        
+        /* Grid View */
+        .view-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .view-grid .note-card { aspect-ratio: 1/1; display: flex; flex-direction: column; }
+        .view-grid .note-preview { -webkit-line-clamp: 4; }
+
+        /* List View */
+        .view-list { display: flex; flex-direction: column; gap: 12px; }
+        .view-list .note-card { min-height: 80px; flex-direction: row; align-items: center; }
+        .view-list .note-content-wrapper { width: 100%; }
+        .view-list .note-preview { -webkit-line-clamp: 1; }
+
+        /* Note Card Styling */
+        .note-card {
+            background-color: var(--surface-color);
+            border-radius: var(--border-radius);
+            padding: 20px;
+            box-shadow: var(--shadow-sm);
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            position: relative;
+            overflow: hidden;
+            animation: fadeIn 0.3s ease-out;
+            color: #1F2937; /* Force dark text on pastel cards for readability */
+        }
+        [data-theme="dark"] .note-card.default-color { color: var(--text-main); } 
+
+        .note-card:active { transform: scale(0.98); }
+        .note-title { font-weight: 700; font-size: 1.1rem; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .note-preview { font-size: 0.9rem; opacity: 0.7; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; line-height: 1.4; }
+        
+        .lock-indicator { position: absolute; top: 15px; right: 15px; background: rgba(0,0,0,0.1); border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; }
+        
+        /* Empty State */
+        .empty-state { text-align: center; margin-top: 50px; color: var(--text-muted); }
+        .empty-state i { font-size: 3rem; margin-bottom: 15px; opacity: 0.5; }
+
+        /* --- FAB --- */
+        .fab { position: absolute; bottom: 30px; right: 24px; width: 64px; height: 64px; background-color: var(--primary); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; box-shadow: var(--shadow-lg); cursor: pointer; border: none; transition: transform 0.2s; z-index: 20; }
+        .fab:hover { transform: scale(1.05); background-color: var(--primary-dark); }
+
+        /* --- EDITOR SCREEN --- */
+        #editor { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg-color); z-index: 50; display: flex; flex-direction: column; transform: translateX(100%); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        #editor.active { transform: translateX(0); }
+        
+        .editor-header { display: flex; justify-content: space-between; padding: 15px 20px; align-items: center; }
+        .editor-actions { display: flex; gap: 10px; }
+        
+        .editor-body { flex: 1; padding: 0 24px 24px; overflow-y: auto; display: flex; flex-direction: column; }
+        #note-title-input { width: 100%; border: none; background: transparent; font-size: 1.8rem; font-weight: 800; color: var(--text-main); outline: none; margin-bottom: 20px; }
+        #note-title-input::placeholder { color: var(--text-muted); opacity: 0.5; }
+        
+        #formatting-toolbar { display: flex; gap: 15px; margin-bottom: 15px; padding: 10px; background: var(--surface-color); border-radius: 12px; box-shadow: var(--shadow-sm); width: max-content; }
+        .format-btn { background: none; border: none; cursor: pointer; color: var(--text-main); font-size: 1rem; padding: 5px; border-radius: 4px; }
+        .format-btn:hover { background: rgba(0,0,0,0.05); }
+
+        #note-content-input { flex: 1; width: 100%; border: none; background: transparent; font-size: 1.1rem; line-height: 1.6; color: var(--text-main); outline: none; resize: none; min-height: 200px; }
+        #note-content-input:empty:before { content: "Start typing..."; color: var(--text-muted); opacity: 0.6; }
+
+        /* Color Picker Modal inside Editor */
+        .color-palette { position: absolute; top: 70px; right: 20px; background: var(--surface-color); padding: 15px; border-radius: 16px; box-shadow: var(--shadow-lg); display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; z-index: 60; border: 1px solid rgba(0,0,0,0.05); }
+        .color-circle { width: 30px; height: 30px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; }
+        .color-circle.selected { border-color: var(--text-main); transform: scale(1.1); }
+
+        /* --- SETTINGS DRAWER --- */
+        .drawer-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 90; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+        .drawer-overlay.open { opacity: 1; pointer-events: auto; }
+        
+        .drawer { position: fixed; top: 0; left: 0; width: 80%; max-width: 320px; height: 100%; background: var(--surface-color); z-index: 100; transform: translateX(-100%); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); padding: 40px 24px; box-shadow: var(--shadow-lg); display: flex; flex-direction: column; }
+        .drawer.open { transform: translateX(0); }
+        
+        .drawer h2 { margin-bottom: 30px; font-size: 1.8rem; color: var(--primary); }
+        .drawer-item { display: flex; align-items: center; justify-content: space-between; padding: 15px 0; border-bottom: 1px solid rgba(0,0,0,0.05); }
+        .drawer-item label { font-size: 1rem; font-weight: 600; }
+        
+        /* Toggle Switch */
+        .switch { position: relative; display: inline-block; width: 50px; height: 26px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }
+        .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--primary); }
+        input:checked + .slider:before { transform: translateX(24px); }
+
+        /* --- PIN MODAL --- */
+        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 200; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+        .modal.active { opacity: 1; pointer-events: auto; }
+        .modal-content { background: var(--surface-color); padding: 30px; border-radius: 24px; width: 90%; max-width: 350px; text-align: center; }
+        .pin-dots { display: flex; justify-content: center; gap: 10px; margin: 20px 0; }
+        .pin-dot { width: 15px; height: 15px; border-radius: 50%; border: 2px solid var(--text-muted); transition: background 0.2s; }
+        .pin-dot.filled { background: var(--primary); border-color: var(--primary); }
+        .keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 20px; }
+        .key { padding: 15px; font-size: 1.2rem; border-radius: 50%; background: var(--bg-color); cursor: pointer; user-select: none; }
+        .key:active { background: #ddd; }
+        
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+    </style>
+</head>
+<body>
+
+    <div id="app">
+        <!-- HEADER -->
+        <header>
+            <button class="btn-icon" onclick="toggleDrawer()"><i class="fa-solid fa-bars"></i></button>
+            <h1>CapiNotes</h1>
+            <button class="btn-icon" onclick="toggleViewMode()" id="view-toggle-btn"><i class="fa-solid fa-border-all"></i></button>
+        </header>
+
+        <!-- SEARCH -->
+        <div class="search-bar">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input type="text" id="search-input" placeholder="Search notes..." oninput="handleSearch()">
+        </div>
+
+        <!-- NOTES LIST -->
+        <div id="notes-container" class="view-grid">
+            <!-- Notes will be injected here via JS -->
+            <div class="empty-state">
+                <i class="fa-regular fa-note-sticky"></i>
+                <p>No notes yet.<br>Tap + to create one.</p>
+            </div>
+        </div>
+
+        <!-- FAB -->
+        <button class="fab" onclick="createNewNote()">
+            <i class="fa-solid fa-plus"></i>
+        </button>
+
+        <!-- DRAWER (SETTINGS) -->
+        <div class="drawer-overlay" onclick="toggleDrawer()"></div>
+        <div class="drawer" id="settings-drawer">
+            <h2>Settings</h2>
+            
+            <div class="drawer-item">
+                <label><i class="fa-solid fa-moon"></i> Dark Mode</label>
+                <label class="switch">
+                    <input type="checkbox" id="theme-toggle" onchange="toggleTheme()">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="drawer-item">
+                <label><i class="fa-solid fa-lock"></i> Security PIN</label>
+                <button class="btn-icon" onclick="initiatePinSetup()"><i class="fa-solid fa-chevron-right"></i></button>
+            </div>
+            
+            <div style="margin-top: auto; text-align: center; color: var(--text-muted); font-size: 0.8rem;">
+                <p>CapiNotes v1.0<br>Local Storage Only</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- NOTE EDITOR OVERLAY -->
+    <div id="editor">
+        <div class="editor-header">
+            <button class="btn-icon" onclick="saveAndCloseEditor()"><i class="fa-solid fa-arrow-left"></i></button>
+            
+            <div class="editor-actions">
+                <button class="btn-icon" onclick="toggleLockState()" id="btn-lock"><i class="fa-solid fa-lock-open"></i></button>
+                <button class="btn-icon" onclick="exportNote()"><i class="fa-solid fa-file-export"></i></button>
+                <button class="btn-icon" onclick="toggleColorPicker()"><i class="fa-solid fa-palette"></i></button>
+                <button class="btn-icon" style="color: #EF4444;" onclick="deleteCurrentNote()"><i class="fa-solid fa-trash"></i></button>
+            </div>
+        </div>
+        
+        <!-- Color Picker Popover -->
+        <div id="color-picker" class="color-palette hidden">
+            <!-- Colors generated by JS -->
+        </div>
+
+        <div class="editor-body">
+            <input type="text" id="note-title-input" placeholder="Title">
+            
+            <div id="formatting-toolbar">
+                <button class="format-btn" onclick="formatDoc('bold')"><i class="fa-solid fa-bold"></i></button>
+                <button class="format-btn" onclick="formatDoc('italic')"><i class="fa-solid fa-italic"></i></button>
+                <button class="format-btn" onclick="formatDoc('underline')"><i class="fa-solid fa-underline"></i></button>
+            </div>
+
+            <div id="note-content-input" contenteditable="true"></div>
+        </div>
+    </div>
+
+    <!-- PIN ENTRY MODAL -->
+    <div id="pin-modal" class="modal">
+        <div class="modal-content">
+            <h3 id="pin-prompt-text">Enter PIN</h3>
+            <div class="pin-dots" id="pin-dots">
+                <div class="pin-dot"></div><div class="pin-dot"></div><div class="pin-dot"></div><div class="pin-dot"></div>
+            </div>
+            <div class="keypad">
+                <div class="key" onclick="enterPinDigit(1)">1</div>
+                <div class="key" onclick="enterPinDigit(2)">2</div>
+                <div class="key" onclick="enterPinDigit(3)">3</div>
+                <div class="key" onclick="enterPinDigit(4)">4</div>
+                <div class="key" onclick="enterPinDigit(5)">5</div>
+                <div class="key" onclick="enterPinDigit(6)">6</div>
+                <div class="key" onclick="enterPinDigit(7)">7</div>
+                <div class="key" onclick="enterPinDigit(8)">8</div>
+                <div class="key" onclick="enterPinDigit(9)">9</div>
+                <div class="key" style="grid-column: 2;" onclick="enterPinDigit(0)">0</div>
+                <div class="key" onclick="clearPinEntry()"><i class="fa-solid fa-delete-left"></i></div>
+            </div>
+            <button class="btn-icon" style="margin-top: 15px;" onclick="closePinModal()">Cancel</button>
+        </div>
+    </div>
+
+    <script>
+        // --- DATA & STATE ---
+        let notes = [];
+        let currentNoteId = null;
+        let settings = {
+            darkMode: false,
+            viewMode: 'grid', // 'grid' or 'list'
+            pin: null
+        };
+
+        // Predefined Colors
+        const colors = [
+            { id: 'default', val: 'var(--note-default)' },
+            { id: 'purple', val: 'var(--note-purple)' },
+            { id: 'pink', val: 'var(--note-pink)' },
+            { id: 'peach', val: 'var(--note-peach)' },
+            { id: 'green', val: 'var(--note-green)' },
+            { id: 'blue', val: 'var(--note-blue)' }
+        ];
+
+        // --- INITIALIZATION ---
+        document.addEventListener('DOMContentLoaded', () => {
+            loadData();
+            renderNotesList();
+            applySettings();
+            generateColorPicker();
+        });
+
+        function loadData() {
+            const storedNotes = localStorage.getItem('capi_notes');
+            if (storedNotes) notes = JSON.parse(storedNotes);
+
+            const storedSettings = localStorage.getItem('capi_settings');
+            if (storedSettings) settings = { ...settings, ...JSON.parse(storedSettings) };
+        }
+
+        function saveData() {
+            localStorage.setItem('capi_notes', JSON.stringify(notes));
+            localStorage.setItem('capi_settings', JSON.stringify(settings));
+        }
+
+        // --- RENDER LOGIC ---
+        function renderNotesList(filterText = '') {
+            const container = document.getElementById('notes-container');
+            container.innerHTML = '';
+
+            const filteredNotes = notes.filter(note => {
+                const searchStr = filterText.toLowerCase();
+                // If locked, don't search content, only title
+                if (note.isLocked) return note.title.toLowerCase().includes(searchStr);
+                return note.title.toLowerCase().includes(searchStr) || note.content.toLowerCase().includes(searchStr);
+            });
+
+            // Sort by modified date (newest first)
+            filteredNotes.sort((a, b) => b.updatedAt - a.updatedAt);
+
+            if (filteredNotes.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fa-regular fa-${filterText ? 'face-frown' : 'note-sticky'}"></i>
+                        <p>${filterText ? 'No matching notes found.' : 'No notes yet.<br>Tap + to create one.'}</p>
+                    </div>`;
+                return;
+            }
+
+            filteredNotes.forEach(note => {
+                const el = document.createElement('div');
+                el.className = `note-card ${note.colorClass || 'default-color'}`;
+                el.style.backgroundColor = getComputedStyle(document.documentElement).getPropertyValue(`--note-${note.colorClass || 'default'}`);
+                
+                // Content Handling for View
+                let previewText = note.isLocked ? "Locked Content" : stripHtml(note.content);
+                if (!previewText && !note.title) previewText = "Empty Note";
+
+                el.innerHTML = `
+                    ${note.isLocked ? '<div class="lock-indicator"><i class="fa-solid fa-lock"></i></div>' : ''}
+                    <div class="note-content-wrapper">
+                        <div class="note-title">${note.title || '(No Title)'}</div>
+                        <div class="note-preview" style="${note.isLocked ? 'filter: blur(4px); opacity: 0.5;' : ''}">
+                            ${note.isLocked ? 'Lorem ipsum secret content hidden' : previewText}
+                        </div>
+                    </div>
+                `;
+                el.onclick = () => openNoteRequest(note.id);
+                container.appendChild(el);
+            });
+        }
+
+        function toggleViewMode() {
+            settings.viewMode = settings.viewMode === 'grid' ? 'list' : 'grid';
+            saveData();
+            applyViewMode();
+        }
+
+        function applyViewMode() {
+            const container = document.getElementById('notes-container');
+            const icon = document.querySelector('#view-toggle-btn i');
+            
+            if (settings.viewMode === 'list') {
+                container.className = 'view-list';
+                icon.className = 'fa-solid fa-border-all'; // Icon to switch back to grid
+            } else {
+                container.className = 'view-grid';
+                icon.className = 'fa-solid fa-list'; // Icon to switch back to list
+            }
+        }
+
+        // --- EDITOR LOGIC ---
+        let tempNoteState = {};
+
+        function createNewNote() {
+            currentNoteId = Date.now().toString();
+            tempNoteState = {
+                id: currentNoteId,
+                title: '',
+                content: '',
+                colorClass: 'default',
+                isLocked: false,
+                createdAt: Date.now(),
+                updatedAt: Date.now()
+            };
+            openEditorUI();
+        }
+
+        function openNoteRequest(id) {
+            const note = notes.find(n => n.id === id);
+            if (!note) return;
+
+            if (note.isLocked) {
+                requestPin((valid) => {
+                    if (valid) {
+                        currentNoteId = id;
+                        tempNoteState = JSON.parse(JSON.stringify(note)); // Deep copy
+                        openEditorUI();
+                    }
+                });
+            } else {
+                currentNoteId = id;
+                tempNoteState = JSON.parse(JSON.stringify(note));
+                openEditorUI();
+            }
+        }
+
+        function openEditorUI() {
+            document.getElementById('note-title-input').value = tempNoteState.title;
+            document.getElementById('note-content-input').innerHTML = tempNoteState.content;
+            updateLockIcon();
+            
+            // Set background color of editor header/bg temporarily to match note? 
+            // Design prompt says clean layout, sticking to default editor bg, but user can pick color.
+            
+            document.getElementById('editor').classList.add('active');
+        }
+
+        function saveAndCloseEditor() {
+            const title = document.getElementById('note-title-input').value.trim();
+            const content = document.getElementById('note-content-input').innerHTML;
+
+            // Only save if there's content or it's an old note being cleared
+            if (title || stripHtml(content)) {
+                tempNoteState.title = title;
+                tempNoteState.content = content;
+                tempNoteState.updatedAt = Date.now();
+
+                const existingIndex = notes.findIndex(n => n.id === currentNoteId);
+                if (existingIndex > -1) {
+                    notes[existingIndex] = tempNoteState;
+                } else {
+                    notes.push(tempNoteState);
+                }
+                saveData();
+            } else if (currentNoteId) {
+                // Discard empty new notes
+                 const existingIndex = notes.findIndex(n => n.id === currentNoteId);
+                 // If it existed but is now empty, user might want to keep it? 
+                 // Logic: If new and empty, discard. If existing and made empty, save.
+                 if(existingIndex === -1) {
+                     // Do nothing, discard
+                 } else {
+                     notes[existingIndex] = tempNoteState;
+                     saveData();
+                 }
+            }
+
+            document.getElementById('editor').classList.remove('active');
+            document.getElementById('color-picker').classList.add('hidden');
+            renderNotesList();
+            currentNoteId = null;
+        }
+
+        function deleteCurrentNote() {
+            if (confirm('Delete this note?')) {
+                notes = notes.filter(n => n.id !== currentNoteId);
+                saveData();
+                document.getElementById('editor').classList.remove('active');
+                renderNotesList();
+            }
+        }
+
+        // --- FORMATTING TOOLBAR ---
+        function formatDoc(cmd, value = null) {
+            document.execCommand(cmd, false, value);
+            document.getElementById('note-content-input').focus();
+        }
+
+        // --- COLOR PICKER ---
+        function generateColorPicker() {
+            const picker = document.getElementById('color-picker');
+            colors.forEach(c => {
+                const div = document.createElement('div');
+                div.className = 'color-circle';
+                div.style.backgroundColor = c.val;
+                div.onclick = () => setColor(c.id);
+                picker.appendChild(div);
+            });
+        }
+
+        function toggleColorPicker() {
+            document.getElementById('color-picker').classList.toggle('hidden');
+        }
+
+        function setColor(colorId) {
+            tempNoteState.colorClass = colorId;
+            toggleColorPicker();
+        }
+
+        // --- SECURITY / PIN ---
+        let pinCallback = null;
+        let currentPinInput = "";
+        let isSettingUpPin = false;
+
+        function initiatePinSetup() {
+            isSettingUpPin = true;
+            toggleDrawer(); // close drawer
+            document.getElementById('pin-prompt-text').innerText = settings.pin ? "Enter Old PIN" : "Set New PIN";
+            openPinModal((valid) => {
+                if(settings.pin && valid) {
+                    // Validated old pin, now set new
+                    currentPinInput = "";
+                    updatePinDots();
+                    document.getElementById('pin-prompt-text').innerText = "Enter New PIN";
+                    // Logic hack: reset isSettingUpPin context or handle phase 2
+                    settings.pin = null; // Clear temporarily to allow setting new
+                    isSettingUpPin = true; // Stay in setup mode
+                } else if (!settings.pin) {
+                    // Setting new pin done
+                    settings.pin = currentPinInput;
+                    saveData();
+                    alert("PIN Set Successfully!");
+                    closePinModal();
+                }
+            });
+        }
+
+        function requestPin(callback) {
+            if (!settings.pin) {
+                alert("Please set a Master PIN in Settings first.");
+                callback(false);
+                return;
+            }
+            document.getElementById('pin-prompt-text').innerText = "Enter PIN";
+            isSettingUpPin = false;
+            openPinModal(callback);
+        }
+
+        function openPinModal(cb) {
+            pinCallback = cb;
+            currentPinInput = "";
+            updatePinDots();
+            document.getElementById('pin-modal').classList.add('active');
+        }
+
+        function closePinModal() {
+            document.getElementById('pin-modal').classList.remove('active');
+            pinCallback = null;
+        }
+
+        function enterPinDigit(digit) {
+            if (currentPinInput.length < 4) {
+                currentPinInput += digit;
+                updatePinDots();
+                if (currentPinInput.length === 4) {
+                    setTimeout(validatePin, 200);
+                }
+            }
+        }
+
+        function clearPinEntry() {
+            currentPinInput = "";
+            updatePinDots();
+        }
+
+        function updatePinDots() {
+            const dots = document.querySelectorAll('.pin-dot');
+            dots.forEach((dot, idx) => {
+                if (idx < currentPinInput.length) dot.classList.add('filled');
+                else dot.classList.remove('filled');
+            });
+        }
+
+        function validatePin() {
+            if (isSettingUpPin && !settings.pin) {
+                // We are setting it for the first time (or reset)
+                if(pinCallback) pinCallback(true);
+                else {
+                    settings.pin = currentPinInput;
+                    saveData();
+                    closePinModal();
+                }
+                return;
+            }
+
+            if (currentPinInput === settings.pin) {
+                if (pinCallback) pinCallback(true);
+                closePinModal();
+            } else {
+                alert("Incorrect PIN");
+                currentPinInput = "";
+                updatePinDots();
+                if (pinCallback) pinCallback(false); // Optional: keep open
+            }
+        }
+
+        function toggleLockState() {
+            if(tempNoteState.isLocked) {
+                // Unlocking requires PIN confirmation if currently locked
+                requestPin((valid) => {
+                    if(valid) {
+                        tempNoteState.isLocked = false;
+                        updateLockIcon();
+                        alert("Note Unlocked");
+                    }
+                });
+            } else {
+                // Locking needs PIN setup
+                if(!settings.pin) {
+                    alert("Setup a PIN in settings first!");
+                    return;
+                }
+                tempNoteState.isLocked = true;
+                updateLockIcon();
+                alert("Note Locked");
+            }
+        }
+
+        function updateLockIcon() {
+            const icon = document.querySelector('#btn-lock i');
+            if (tempNoteState.isLocked) {
+                icon.className = 'fa-solid fa-lock';
+                icon.parentElement.style.color = 'var(--primary)';
+            } else {
+                icon.className = 'fa-solid fa-lock-open';
+                icon.parentElement.style.color = 'var(--text-main)';
+            }
+        }
+
+        // --- UTILS ---
+        function toggleDrawer() {
+            const drawer = document.getElementById('settings-drawer');
+            const overlay = document.querySelector('.drawer-overlay');
+            if (drawer.classList.contains('open')) {
+                drawer.classList.remove('open');
+                overlay.classList.remove('open');
+            } else {
+                drawer.classList.add('open');
+                overlay.classList.add('open');
+            }
+        }
+
+        function toggleTheme() {
+            settings.darkMode = !settings.darkMode;
+            saveData();
+            applySettings();
+        }
+
+        function applySettings() {
+            document.documentElement.setAttribute('data-theme', settings.darkMode ? 'dark' : 'light');
+            document.getElementById('theme-toggle').checked = settings.darkMode;
+            applyViewMode();
+        }
+
+        function handleSearch() {
+            const txt = document.getElementById('search-input').value;
+            renderNotesList(txt);
+        }
+
+        function stripHtml(html) {
+            let tmp = document.createElement("DIV");
+            tmp.innerHTML = html;
+            return tmp.textContent || tmp.innerText || "";
+        }
+
+        function exportNote() {
+            const textToSave = `Title: ${tempNoteState.title}\n\n${stripHtml(tempNoteState.content)}`;
+            const hiddenElement = document.createElement('a');
+            hiddenElement.href = 'data:attachment/text,' + encodeURI(textToSave);
+            hiddenElement.target = '_blank';
+            hiddenElement.download = `${tempNoteState.title || 'note'}.txt`;
+            hiddenElement.click();
+        }
+
+    </script>
+</body>
+</html>
